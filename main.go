@@ -146,11 +146,11 @@ func mapWorker(scanEntry ScanEntry, dirMap *DirMap, scanChan chan ScanEntry) err
 }
 
 func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent) {
-	if len(dirA.Children()) > 0 {
-		dirA.ForChild(func(d *dirtree.Dirent) bool {
-			walkDir(mapA, mapB, d)
-			return true
-		})
+	sortedChildren := dirA.List()
+	if len(sortedChildren) > 0 {
+		for _, childName := range sortedChildren {
+			walkDir(mapA, mapB, dirA.Child(childName))
+		}
 		return
 	}
 	h, ok := mapA.entryMap[dirA]
