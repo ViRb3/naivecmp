@@ -13,10 +13,11 @@ While this tool has been perfectly accurate in my own tests, it is still fundame
 ### Features
 
 - Bi-directional diff
-- Very fast (10TB+ hard drive array in less than 30 seconds on a Raspberry Pi 4)
-- Low memory usage (<300MB for 10TB+)
+- Very fast (10TB+ hard drive array in less than 20 seconds on a Raspberry Pi 4)
+- Low memory usage (less than 300MB for scanning 10TB+ of data)
 - Configurable matching conditions
 - Tracks files even when they were moved and/or renamed
+- Parallel directory scanning
 
 ### Usage
 
@@ -35,6 +36,7 @@ Flags:
       --use-size        Use file size (default true).
       --use-mode        Use file mode (default false).
       --use-name        Use file name even when there is no collision (default false).
+      --workers=12      Count of parallel workers for scanning.
 
 naivecmp: error: expected "<dir-a> <dir-b>"
 ```

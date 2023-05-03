@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 var CLI struct {
@@ -20,6 +21,7 @@ var CLI struct {
 	UseSize    bool   `default:"true" help:"Use file size (default true)."`
 	UseMode    bool   `default:"false" help:"Use file mode (default false)."`
 	UseName    bool   `default:"false" help:"Use file name even when there is no collision (default false)."`
+	Workers    int    `default:"12" help:"Count of parallel workers for scanning."`
 }
 
 func main() {
@@ -56,61 +58,94 @@ func hash(info fs.FileInfo) uint64 {
 }
 
 type DirMap struct {
-	root     *dirtree.Dirent
-	hashMap  map[uint64][]*dirtree.Dirent
-	entryMap map[*dirtree.Dirent]uint64
+	root      *dirtree.Dirent
+	basePath  string
+	hashMap   map[uint64][]*dirtree.Dirent
+	entryMap  map[*dirtree.Dirent]uint64
+	mapMutex  sync.Mutex
+	treeMutex sync.Mutex
+	wg        sync.WaitGroup
 }
 
-func mapDir(dir string) (DirMap, error) {
+type ScanEntry struct {
+	path  string
+	isDir bool
+}
+
+func mapDir(dir string) (*DirMap, error) {
 	dirMap := DirMap{
 		root:     dirtree.New(""),
+		basePath: dir,
 		hashMap:  map[uint64][]*dirtree.Dirent{},
 		entryMap: map[*dirtree.Dirent]uint64{},
 	}
-	if err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	dirChan := make(chan ScanEntry, 1024)
+	for i := 0; i < CLI.Workers/2; i++ {
+		go func() {
+			for entry := range dirChan {
+				if err := mapWorker(entry, &dirMap, dirChan); err != nil {
+					log.Fatalln(err)
+				}
+			}
+		}()
+	}
+	dirMap.wg.Add(1)
+	dirChan <- ScanEntry{"", true}
+	dirMap.wg.Wait()
+	return &dirMap, nil
+}
+
+func mapWorker(scanEntry ScanEntry, dirMap *DirMap, scanChan chan ScanEntry) error {
+	defer dirMap.wg.Done()
+	if scanEntry.isDir {
+		children, err := os.ReadDir(filepath.Join(dirMap.basePath, scanEntry.path))
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		curNode := dirMap.root
-		for _, part := range strings.Split(rel, string(os.PathSeparator)) {
-			newNode := curNode.Child(part)
-			if newNode == nil {
-				newNode, err = curNode.Add(part)
-				if err != nil {
+		dirMap.wg.Add(len(children))
+		for _, child := range children {
+			newEntry := ScanEntry{filepath.Join(scanEntry.path, child.Name()), child.IsDir()}
+			select {
+			case scanChan <- newEntry:
+			default:
+				if err := mapWorker(newEntry, dirMap, scanChan); err != nil {
 					return err
 				}
 			}
-			curNode = newNode
 		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		h := hash(info)
-		if v, ok := dirMap.hashMap[h]; ok {
-			dirMap.hashMap[h] = append(v, curNode)
-		} else {
-			dirMap.hashMap[h] = []*dirtree.Dirent{curNode}
-		}
-		dirMap.entryMap[curNode] = h
 		return nil
-	}); err != nil {
-		return DirMap{}, err
 	}
-	return dirMap, nil
+	curNode := dirMap.root
+	dirMap.treeMutex.Lock()
+	for _, part := range strings.Split(scanEntry.path, string(os.PathSeparator)) {
+		newNode := curNode.Child(part)
+		var err error
+		if newNode == nil {
+			newNode, err = curNode.Add(part)
+			if err != nil {
+				return err
+			}
+		}
+		curNode = newNode
+	}
+	dirMap.treeMutex.Unlock()
+	info, err := os.Lstat(filepath.Join(dirMap.basePath, scanEntry.path))
+	if err != nil {
+		return err
+	}
+	h := hash(info)
+	dirMap.mapMutex.Lock()
+	if v, ok := dirMap.hashMap[h]; ok {
+		dirMap.hashMap[h] = append(v, curNode)
+	} else {
+		dirMap.hashMap[h] = []*dirtree.Dirent{curNode}
+	}
+	dirMap.entryMap[curNode] = h
+	dirMap.mapMutex.Unlock()
+	return nil
 }
 
-func walkDir(mapA, mapB DirMap, dirA *dirtree.Dirent) {
+func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent) {
 	if len(dirA.Children()) > 0 {
 		dirA.ForChild(func(d *dirtree.Dirent) bool {
 			walkDir(mapA, mapB, d)
@@ -146,16 +181,29 @@ func walkDir(mapA, mapB DirMap, dirA *dirtree.Dirent) {
 }
 
 func work() error {
-	log.Println("Mapping directory A...")
-	dirA, err := mapDir(CLI.DirA)
-	if err != nil {
-		return err
-	}
-	log.Println("Mapping directory B...")
-	dirB, err := mapDir(CLI.DirB)
-	if err != nil {
-		return err
-	}
+	log.Println("Mapping directories...")
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var dirA, dirB *DirMap
+	go func() {
+		result, err := mapDir(CLI.DirA)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		dirA = result
+		log.Println("Finished " + CLI.DirA)
+		wg.Done()
+	}()
+	go func() {
+		result, err := mapDir(CLI.DirB)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		dirB = result
+		log.Println("Finished " + CLI.DirB)
+		wg.Done()
+	}()
+	wg.Wait()
 	log.Println("Comparing...")
 	fmt.Printf("========== Only in %s ==========\n", CLI.DirA)
 	walkDir(dirA, dirB, dirA.root)
