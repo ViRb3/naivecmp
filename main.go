@@ -307,12 +307,17 @@ func work() error {
 	return nil
 }
 
+type NodeReference struct {
+	entry *dirtree.Dirent
+	isDir bool
+}
+
 func addHandler(node *tview.TreeNode, pageData []PageData) {
 	var dirs []*dirtree.Dirent
 	var files []*dirtree.Dirent
-	reference := node.GetReference().(*dirtree.Dirent)
-	for _, name := range reference.List() {
-		d := reference.Child(name)
+	reference := node.GetReference().(NodeReference)
+	for _, name := range reference.entry.List() {
+		d := reference.entry.Child(name)
 		if hasChildren(d) {
 			dirs = append(dirs, d)
 		} else {
@@ -329,7 +334,7 @@ func addHandler(node *tview.TreeNode, pageData []PageData) {
 	for _, entry := range combined {
 		presentInBoth := true
 		for _, data := range pageData {
-			if pathToDirent(data.dirDiff, reference.Path()+"/"+entry.String()) == nil {
+			if pathToDirent(data.dirDiff, reference.entry.Path()+"/"+entry.String()) == nil {
 				presentInBoth = false
 				break
 			}
@@ -350,7 +355,7 @@ func addHandler(node *tview.TreeNode, pageData []PageData) {
 			}
 		}
 		node.AddChild(tview.NewTreeNode(entry.String()).
-			SetReference(entry).
+			SetReference(NodeReference{entry, isDir}).
 			SetExpanded(false).
 			SetColor(color).
 			SetSelectable(isDir))
@@ -417,7 +422,7 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 	for _, data := range pageData {
 		root := tview.NewTreeNode(data.dirPath).
 			SetColor(tcell.ColorRed).
-			SetReference(data.dirDiff)
+			SetReference(NodeReference{data.dirDiff, true})
 		addHandler(root, pageData)
 		pages.AddPage(data.pageName, tview.NewTreeView().
 			SetRoot(root).
@@ -453,15 +458,35 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 			}
 			_, newPage := pages.GetFrontPage()
 			newTree := newPage.(*tview.TreeView)
-			newNode := expandPathToClosestNode(newTree.GetRoot(), node.GetReference().(*dirtree.Dirent).Path(), pageData)
+			newNode := expandPathToClosestNode(newTree.GetRoot(), node.GetReference().(NodeReference).entry.Path(), pageData)
 			newTree.SetCurrentNode(newNode)
 			return nil
 		case tcell.KeyF1:
 			selectHandler(tree.GetCurrentNode(), true, pageData)
+			return nil
 		case tcell.KeyLeft:
-			fallthrough
+			node := tree.GetCurrentNode()
+			if node.IsExpanded() {
+				node.Collapse()
+			} else {
+				parentNode := expandPathToClosestNode(
+					tree.GetRoot(), filepath.Join(node.GetReference().(NodeReference).entry.Path(), ".."), pageData)
+				tree.SetCurrentNode(parentNode)
+			}
+			return nil
 		case tcell.KeyRight:
-			selectHandler(tree.GetCurrentNode(), false, pageData)
+			node := tree.GetCurrentNode()
+			if !tree.GetCurrentNode().IsExpanded() {
+				selectHandler(node, false, pageData)
+			} else {
+				children := node.GetChildren()
+				for _, child := range children {
+					if child.GetReference().(NodeReference).isDir {
+						tree.SetCurrentNode(child)
+						break
+					}
+				}
+			}
 			return nil
 		case tcell.KeyRune:
 			if event.Rune() >= '1' && event.Rune() <= '9' {
