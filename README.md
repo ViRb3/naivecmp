@@ -18,6 +18,7 @@ While this tool has been perfectly accurate in my own tests, it is still fundame
 - Configurable matching conditions
 - Tracks files even when they were moved and/or renamed
 - Parallel directory scanning
+- TreeView GUI and text mode
 
 ### Usage
 
@@ -37,9 +38,17 @@ Flags:
       --use-mode        Use file mode (default false).
       --use-name        Use file name even when there is no collision (default false).
       --workers=12      Count of parallel workers for scanning.
-
-naivecmp: error: expected "<dir-a> <dir-b>"
+      --text            Print results in text instead of GUI.
 ```
 
-Diffs will be printed to stdout, while status updates will go to stderr.
+In GUI mode (default), you will be presented with a TreeView that lets you explore the differences in each directory.
 
+| Hotkeys                   | Colors                                   |
+| ------------------------- | ---------------------------------------- |
+| [q] quit                  | [white] new file                         |
+| [space] switch views      | [green] directory                        |
+| [tab] focus in other view | [yellow] directory present in both sides |
+| [F1] toggle all           | [blue] file present in both sides        |
+| [1-9] toggle at depth     |                                          |
+
+In text mode, differences will be printed to stdout, while status updates will go to stderr.

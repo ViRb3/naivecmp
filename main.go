@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"github.com/alecthomas/kong"
 	"github.com/gammazero/dirtree"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 	"hash/maphash"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -22,6 +25,7 @@ var CLI struct {
 	UseMode    bool   `default:"false" help:"Use file mode (default false)."`
 	UseName    bool   `default:"false" help:"Use file name even when there is no collision (default false)."`
 	Workers    int    `default:"12" help:"Count of parallel workers for scanning."`
+	Text       bool   `default:"false" help:"Print results in text instead of GUI."`
 }
 
 func main() {
@@ -145,18 +149,22 @@ func mapWorker(scanEntry ScanEntry, dirMap *DirMap, scanChan chan ScanEntry) err
 	return nil
 }
 
-func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent) {
-	sortedChildren := dirA.List()
-	if len(sortedChildren) > 0 {
-		for _, childName := range sortedChildren {
-			walkDir(mapA, mapB, dirA.Child(childName))
+func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent, diff *dirtree.Dirent) error {
+	isDir := false
+	dirA.ForChild(func(d *dirtree.Dirent) bool {
+		isDir = true
+		if err := walkDir(mapA, mapB, d, diff); err != nil {
+			log.Fatalln(err)
 		}
-		return
+		return true
+	})
+	if isDir {
+		return nil
 	}
 	h, ok := mapA.entryMap[dirA]
 	if !ok {
 		// this is a directory
-		return
+		return nil
 	}
 	var matched bool
 	if matches, ok := mapB.hashMap[h]; !ok {
@@ -176,8 +184,80 @@ func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent) {
 		}
 	}
 	if !matched {
-		fmt.Println(dirA.Path())
+		parts := strings.Split(dirA.Path(), "/")
+		curNode := diff
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+			newNode := curNode.Child(part)
+			var err error
+			if newNode == nil {
+				newNode, err = curNode.Add(part)
+				if err != nil {
+					return err
+				}
+			}
+			curNode = newNode
+		}
 	}
+	return nil
+}
+
+func hasChildren(d *dirtree.Dirent) bool {
+	result := false
+	d.ForChild(func(d *dirtree.Dirent) bool {
+		result = true
+		return false
+	})
+	return result
+}
+
+func pathToDirent(root *dirtree.Dirent, path string) *dirtree.Dirent {
+	currNode := root
+	for _, part := range append(strings.Split(path, "/")) {
+		if part == "" {
+			continue
+		}
+		currNode = currNode.Child(part)
+		if currNode == nil {
+			return nil
+		}
+	}
+	return currNode
+}
+
+func expandPathToClosestNode(root *tview.TreeNode, path string, pageData []PageData) *tview.TreeNode {
+	currNode := root
+outer:
+	for _, part := range append(strings.Split(path, "/")) {
+		if part == "" {
+			continue
+		}
+		if len(currNode.GetChildren()) == 0 {
+			addHandler(currNode, pageData)
+		}
+		currNode.Expand()
+		for _, child := range currNode.GetChildren() {
+			if child.GetText() == part {
+				currNode = child
+				continue outer
+			}
+		}
+		return currNode
+	}
+	return currNode
+}
+
+func printDir(dir *dirtree.Dirent) {
+	sortedChildren := dir.List()
+	if len(sortedChildren) > 0 {
+		for _, childName := range sortedChildren {
+			printDir(dir.Child(childName))
+		}
+		return
+	}
+	fmt.Println(dir.Path())
 }
 
 func work() error {
@@ -205,10 +285,208 @@ func work() error {
 	}()
 	wg.Wait()
 	log.Println("Comparing...")
-	fmt.Printf("========== Only in %s ==========\n", CLI.DirA)
-	walkDir(dirA, dirB, dirA.root)
-	fmt.Printf("========== Only in %s ==========\n", CLI.DirB)
-	walkDir(dirB, dirA, dirB.root)
+	diffA := dirtree.New("")
+	if err := walkDir(dirA, dirB, dirA.root, diffA); err != nil {
+		return err
+	}
+	diffB := dirtree.New("")
+	if err := walkDir(dirB, dirA, dirB.root, diffB); err != nil {
+		return err
+	}
 	log.Println("Done")
+	if CLI.Text {
+		fmt.Printf("========== Only in %s ==========\n", CLI.DirA)
+		printDir(diffA)
+		fmt.Printf("========== Only in %s ==========\n", CLI.DirB)
+		printDir(diffB)
+	} else {
+		if err := renderUI(diffA, diffB); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addHandler(node *tview.TreeNode, pageData []PageData) {
+	var dirs []*dirtree.Dirent
+	var files []*dirtree.Dirent
+	reference := node.GetReference().(*dirtree.Dirent)
+	for _, name := range reference.List() {
+		d := reference.Child(name)
+		if hasChildren(d) {
+			dirs = append(dirs, d)
+		} else {
+			files = append(files, d)
+		}
+	}
+	var combined []*dirtree.Dirent
+	for _, dir := range dirs {
+		combined = append(combined, dir)
+	}
+	for _, file := range files {
+		combined = append(combined, file)
+	}
+	for _, entry := range combined {
+		presentInBoth := true
+		for _, data := range pageData {
+			if pathToDirent(data.dirDiff, reference.Path()+"/"+entry.String()) == nil {
+				presentInBoth = false
+				break
+			}
+		}
+		isDir := hasChildren(entry)
+		var color tcell.Color
+		if presentInBoth {
+			if isDir {
+				color = tcell.ColorYellow
+			} else {
+				color = tcell.ColorBlue
+			}
+		} else {
+			if isDir {
+				color = tcell.ColorGreen
+			} else {
+				color = tcell.ColorWhite
+			}
+		}
+		node.AddChild(tview.NewTreeNode(entry.String()).
+			SetReference(entry).
+			SetExpanded(false).
+			SetColor(color).
+			SetSelectable(isDir))
+	}
+}
+
+func selectHandler(node *tview.TreeNode, recurse bool, pageData []PageData) {
+	if node.IsExpanded() {
+		if recurse {
+			collapseAll(node)
+		} else {
+			node.Collapse()
+		}
+	} else {
+		children := node.GetChildren()
+		if len(children) == 0 {
+			addHandler(node, pageData)
+		}
+		node.SetExpanded(true)
+		if recurse {
+			for _, child := range node.GetChildren() {
+				selectHandler(child, true, pageData)
+			}
+		}
+	}
+}
+
+// https://github.com/rivo/tview/pull/848
+func collapseAll(node *tview.TreeNode) {
+	node.Walk(func(n, parent *tview.TreeNode) bool {
+		n.SetExpanded(false)
+		return true
+	})
+}
+
+func expandAtDepth(node *tview.TreeNode, depth int, pageData []PageData) {
+	children := node.GetChildren()
+	if len(children) == 0 {
+		addHandler(node, pageData)
+	}
+	if depth < 1 {
+		collapseAll(node)
+	} else {
+		node.SetExpanded(true)
+		for _, child := range children {
+			expandAtDepth(child, depth-1, pageData)
+		}
+	}
+}
+
+type PageData struct {
+	pageName string
+	dirPath  string
+	dirDiff  *dirtree.Dirent
+}
+
+func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
+	app := tview.NewApplication()
+	pageData := []PageData{
+		{"1", CLI.DirA, diffA},
+		{"2", CLI.DirB, diffB},
+	}
+	pages := tview.NewPages()
+	for _, data := range pageData {
+		root := tview.NewTreeNode(data.dirPath).
+			SetColor(tcell.ColorRed).
+			SetReference(data.dirDiff)
+		addHandler(root, pageData)
+		pages.AddPage(data.pageName, tview.NewTreeView().
+			SetRoot(root).
+			SetCurrentNode(root), true, false)
+	}
+	cellSize := 25
+	info := tview.NewGrid().
+		SetRows(1, 1).
+		SetColumns(cellSize, cellSize, cellSize).
+		AddItem(tview.NewTextView().SetText("[q] quit"), 0, 0, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[space] switch views"), 0, 1, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[tab] focus in other view"), 0, 2, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[F1] toggle all"), 1, 0, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[1-9] toggle at depth"), 1, 1, 1, 2, 0, 0, false)
+	layout := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(pages, 0, 1, true).
+		AddItem(tview.NewFlex().
+			SetDirection(tview.FlexColumn).
+			AddItem(info, cellSize*3, 1, false).
+			AddItem(tview.NewTextView().SetText(" "), 0, 1, false),
+			2, 1, false)
+	layout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		pageName, page := pages.GetFrontPage()
+		tree := page.(*tview.TreeView)
+		switch event.Key() {
+		case tcell.KeyTab:
+			node := tree.GetCurrentNode()
+			if pageName == "1" {
+				pages.SwitchToPage("2")
+			} else {
+				pages.SwitchToPage("1")
+			}
+			_, newPage := pages.GetFrontPage()
+			newTree := newPage.(*tview.TreeView)
+			newNode := expandPathToClosestNode(newTree.GetRoot(), node.GetReference().(*dirtree.Dirent).Path(), pageData)
+			newTree.SetCurrentNode(newNode)
+			return nil
+		case tcell.KeyF1:
+			selectHandler(tree.GetCurrentNode(), true, pageData)
+		case tcell.KeyLeft:
+			fallthrough
+		case tcell.KeyRight:
+			selectHandler(tree.GetCurrentNode(), false, pageData)
+			return nil
+		case tcell.KeyRune:
+			if event.Rune() >= '1' && event.Rune() <= '9' {
+				depth, err := strconv.ParseInt(string(event.Rune()), 10, 64)
+				if err != nil {
+					log.Fatalln(err)
+				}
+				expandAtDepth(tree.GetCurrentNode(), int(depth), pageData)
+			} else if event.Rune() == 'q' {
+				app.Stop()
+			} else if event.Rune() == ' ' {
+				if pageName == "1" {
+					pages.SwitchToPage("2")
+				} else {
+					pages.SwitchToPage("1")
+				}
+			}
+			return nil
+		}
+		return event
+	})
+	app.SetRoot(layout, true)
+	pages.SwitchToPage("1")
+	if err := app.Run(); err != nil {
+		return err
+	}
 	return nil
 }
