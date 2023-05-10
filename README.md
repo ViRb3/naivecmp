@@ -37,7 +37,7 @@ Flags:
       --use-size        Use file size (default true).
       --use-mode        Use file mode (default false).
       --use-name        Use file name even when there is no collision (default false).
-      --workers=12      Count of parallel workers for scanning.
+      --workers=6       Count of parallel workers per directory.
       --text            Print results in text instead of GUI.
 ```
 

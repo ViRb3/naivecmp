@@ -24,7 +24,7 @@ var CLI struct {
 	UseSize    bool   `default:"true" help:"Use file size (default true)."`
 	UseMode    bool   `default:"false" help:"Use file mode (default false)."`
 	UseName    bool   `default:"false" help:"Use file name even when there is no collision (default false)."`
-	Workers    int    `default:"12" help:"Count of parallel workers for scanning."`
+	Workers    int    `default:"6" help:"Count of parallel workers per directory."`
 	Text       bool   `default:"false" help:"Print results in text instead of GUI."`
 }
 
@@ -84,7 +84,7 @@ func mapDir(dir string) (*DirMap, error) {
 		entryMap: map[*dirtree.Dirent]uint64{},
 	}
 	dirChan := make(chan ScanEntry, 1024)
-	for i := 0; i < CLI.Workers/2; i++ {
+	for i := 0; i < CLI.Workers; i++ {
 		go func() {
 			for entry := range dirChan {
 				if err := mapWorker(entry, &dirMap, dirChan); err != nil {
