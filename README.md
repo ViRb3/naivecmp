@@ -50,5 +50,6 @@ In GUI mode (default), you will be presented with a TreeView that lets you explo
 | [tab] focus in other view | [yellow] directory present in both sides |
 | [F1] toggle all           | [blue] file present in both sides        |
 | [1-9] toggle at depth     |                                          |
+| [d] hide from view        |                                          |
 
 In text mode, differences will be printed to stdout, while status updates will go to stderr.

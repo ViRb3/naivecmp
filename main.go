@@ -436,7 +436,8 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 		AddItem(tview.NewTextView().SetText("[space] switch views"), 0, 1, 1, 1, 0, 0, false).
 		AddItem(tview.NewTextView().SetText("[tab] focus in other view"), 0, 2, 1, 1, 0, 0, false).
 		AddItem(tview.NewTextView().SetText("[F1] toggle all"), 1, 0, 1, 1, 0, 0, false).
-		AddItem(tview.NewTextView().SetText("[1-9] toggle at depth"), 1, 1, 1, 2, 0, 0, false)
+		AddItem(tview.NewTextView().SetText("[1-9] toggle at depth"), 1, 1, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[d] hide from view"), 1, 2, 1, 1, 0, 0, false)
 	layout := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(pages, 0, 1, true).
@@ -503,6 +504,30 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 				} else {
 					pages.SwitchToPage("1")
 				}
+			} else if event.Rune() == 'd' {
+				node := tree.GetCurrentNode()
+				parentNode := expandPathToClosestNode(
+					tree.GetRoot(), filepath.Join(node.GetReference().(NodeReference).entry.Path(), ".."), pageData)
+				children := parentNode.GetChildren()
+				found := false
+				var nextNode *tview.TreeNode
+				for _, child := range children {
+					if child == node {
+						found = true
+						continue
+					}
+					if child.GetReference().(NodeReference).isDir {
+						nextNode = child
+						if found {
+							break
+						}
+					}
+				}
+				if nextNode == nil {
+					nextNode = parentNode
+				}
+				tree.SetCurrentNode(nextNode)
+				parentNode.RemoveChild(node)
 			}
 			return nil
 		}
