@@ -315,6 +315,9 @@ type NodeReference struct {
 func addHandler(node *tview.TreeNode, pageData []PageData) {
 	var dirs []*dirtree.Dirent
 	var files []*dirtree.Dirent
+	if node.GetReference() == nil {
+		return
+	}
 	reference := node.GetReference().(NodeReference)
 	for _, name := range reference.entry.List() {
 		d := reference.entry.Child(name)
@@ -424,6 +427,11 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 			SetColor(tcell.ColorRed).
 			SetReference(NodeReference{data.dirDiff, true})
 		addHandler(root, pageData)
+		// this is a dummy directory, always last, so the user can select it and see any files that may otherwise be out of view
+		root.AddChild(tview.NewTreeNode(" ").
+			SetExpanded(false).
+			SetReference(nil).
+			SetSelectable(true))
 		pages.AddPage(data.pageName, tview.NewTreeView().
 			SetRoot(root).
 			SetCurrentNode(root), true, false)
@@ -449,9 +457,41 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 	layout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		pageName, page := pages.GetFrontPage()
 		tree := page.(*tview.TreeView)
+		node := tree.GetCurrentNode()
+		// restrict keys allowed for dummy directory
+		if node.GetReference() == nil {
+			switch event.Key() {
+			case tcell.KeyUp:
+				fallthrough
+			case tcell.KeyDown:
+				fallthrough
+			case tcell.KeyPgUp:
+				fallthrough
+			case tcell.KeyPgDn:
+				break
+			case tcell.KeyRune:
+				switch event.Rune() {
+				case 'q':
+					fallthrough
+				case ' ':
+					break
+				default:
+					return nil
+				}
+			default:
+				return nil
+			}
+		}
 		switch event.Key() {
+		case tcell.KeyUp:
+			fallthrough
+		case tcell.KeyDown:
+			fallthrough
+		case tcell.KeyPgUp:
+			fallthrough
+		case tcell.KeyPgDn:
+			return event
 		case tcell.KeyTab:
-			node := tree.GetCurrentNode()
 			if pageName == "1" {
 				pages.SwitchToPage("2")
 			} else {
@@ -461,12 +501,9 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 			newTree := newPage.(*tview.TreeView)
 			newNode := expandPathToClosestNode(newTree.GetRoot(), node.GetReference().(NodeReference).entry.Path(), pageData)
 			newTree.SetCurrentNode(newNode)
-			return nil
 		case tcell.KeyF1:
-			selectHandler(tree.GetCurrentNode(), true, pageData)
-			return nil
+			selectHandler(node, true, pageData)
 		case tcell.KeyLeft:
-			node := tree.GetCurrentNode()
 			if node.IsExpanded() {
 				node.Collapse()
 			} else {
@@ -474,28 +511,25 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 					tree.GetRoot(), filepath.Join(node.GetReference().(NodeReference).entry.Path(), ".."), pageData)
 				tree.SetCurrentNode(parentNode)
 			}
-			return nil
 		case tcell.KeyRight:
-			node := tree.GetCurrentNode()
-			if !tree.GetCurrentNode().IsExpanded() {
+			if !node.IsExpanded() {
 				selectHandler(node, false, pageData)
 			} else {
 				children := node.GetChildren()
 				for _, child := range children {
-					if child.GetReference().(NodeReference).isDir {
+					if child.GetReference() != nil && child.GetReference().(NodeReference).isDir {
 						tree.SetCurrentNode(child)
 						break
 					}
 				}
 			}
-			return nil
 		case tcell.KeyRune:
 			if event.Rune() >= '1' && event.Rune() <= '9' {
 				depth, err := strconv.ParseInt(string(event.Rune()), 10, 64)
 				if err != nil {
 					log.Fatalln(err)
 				}
-				expandAtDepth(tree.GetCurrentNode(), int(depth), pageData)
+				expandAtDepth(node, int(depth), pageData)
 			} else if event.Rune() == 'q' {
 				app.Stop()
 			} else if event.Rune() == ' ' {
@@ -505,7 +539,6 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 					pages.SwitchToPage("1")
 				}
 			} else if event.Rune() == 'd' {
-				node := tree.GetCurrentNode()
 				parentNode := expandPathToClosestNode(
 					tree.GetRoot(), filepath.Join(node.GetReference().(NodeReference).entry.Path(), ".."), pageData)
 				children := parentNode.GetChildren()
@@ -516,7 +549,7 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 						found = true
 						continue
 					}
-					if child.GetReference().(NodeReference).isDir {
+					if child.GetReference() != nil && child.GetReference().(NodeReference).isDir {
 						nextNode = child
 						if found {
 							break
@@ -529,9 +562,8 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 				tree.SetCurrentNode(nextNode)
 				parentNode.RemoveChild(node)
 			}
-			return nil
 		}
-		return event
+		return nil
 	})
 	app.SetRoot(layout, true)
 	pages.SwitchToPage("1")
