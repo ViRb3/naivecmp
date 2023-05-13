@@ -368,7 +368,7 @@ func addHandler(node *tview.TreeNode, pageData []PageData) {
 func selectHandler(node *tview.TreeNode, recurse bool, pageData []PageData) {
 	if node.IsExpanded() {
 		if recurse {
-			collapseAll(node)
+			node.CollapseAll()
 		} else {
 			node.Collapse()
 		}
@@ -386,21 +386,13 @@ func selectHandler(node *tview.TreeNode, recurse bool, pageData []PageData) {
 	}
 }
 
-// https://github.com/rivo/tview/pull/848
-func collapseAll(node *tview.TreeNode) {
-	node.Walk(func(n, parent *tview.TreeNode) bool {
-		n.SetExpanded(false)
-		return true
-	})
-}
-
 func expandAtDepth(node *tview.TreeNode, depth int, pageData []PageData) {
 	children := node.GetChildren()
 	if len(children) == 0 {
 		addHandler(node, pageData)
 	}
 	if depth < 1 {
-		collapseAll(node)
+		node.CollapseAll()
 	} else {
 		node.SetExpanded(true)
 		for _, child := range children {
