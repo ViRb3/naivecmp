@@ -48,7 +48,8 @@ In GUI mode (default), you will be presented with a TreeView that lets you explo
 | [q] quit                  | [white] new file                         |
 | [space] switch views      | [green] directory                        |
 | [tab] focus in other view | [yellow] directory present in both sides |
-| [F1] toggle all           | [blue] file present in both sides        |
+| [shift+] free move        | [blue] file present in both sides        |
+| [F1] toggle all           |                                          |
 | [1-9] toggle at depth     |                                          |
 | [d] hide from view        |                                          |
 

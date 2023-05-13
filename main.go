@@ -429,29 +429,50 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 			SetCurrentNode(root), true, false)
 	}
 	cellSize := 25
+	var columns []int
+	for i := 0; i < 4; i++ {
+		columns = append(columns, cellSize)
+	}
 	info := tview.NewGrid().
 		SetRows(1, 1).
-		SetColumns(cellSize, cellSize, cellSize).
+		SetColumns(columns...).
 		AddItem(tview.NewTextView().SetText("[q] quit"), 0, 0, 1, 1, 0, 0, false).
 		AddItem(tview.NewTextView().SetText("[space] switch views"), 0, 1, 1, 1, 0, 0, false).
-		AddItem(tview.NewTextView().SetText("[tab] focus in other view"), 0, 2, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[shift+] free move"), 0, 2, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[tab] focus in other view"), 0, 3, 1, 1, 0, 0, false).
 		AddItem(tview.NewTextView().SetText("[F1] toggle all"), 1, 0, 1, 1, 0, 0, false).
 		AddItem(tview.NewTextView().SetText("[1-9] toggle at depth"), 1, 1, 1, 1, 0, 0, false).
-		AddItem(tview.NewTextView().SetText("[d] hide from view"), 1, 2, 1, 1, 0, 0, false)
+		AddItem(tview.NewTextView().SetText("[d] hide from view"), 1, 2, 1, 2, 0, 0, false)
 	layout := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(pages, 0, 1, true).
 		AddItem(tview.NewFlex().
 			SetDirection(tview.FlexColumn).
-			AddItem(info, cellSize*3, 1, false).
+			AddItem(info, cellSize*len(columns), 1, false).
 			AddItem(tview.NewTextView().SetText(" "), 0, 1, false),
 			2, 1, false)
+	var lastSelection *tview.TreeNode
 	layout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		pageName, page := pages.GetFrontPage()
 		tree := page.(*tview.TreeView)
 		node := tree.GetCurrentNode()
-		// restrict keys allowed for dummy directory
-		if node.GetReference() == nil {
+		// restrict keys allowed for "free move"
+		if node == nil {
+			switch event.Key() {
+			case tcell.KeyUp:
+				fallthrough
+			case tcell.KeyDown:
+				fallthrough
+			case tcell.KeyPgUp:
+				fallthrough
+			case tcell.KeyPgDn:
+				break
+			default:
+				return nil
+			}
+		}
+		// restrict keys allowed for "dummy directory"
+		if node != nil && node.GetReference() == nil {
 			switch event.Key() {
 			case tcell.KeyUp:
 				fallthrough
@@ -482,6 +503,14 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 		case tcell.KeyPgUp:
 			fallthrough
 		case tcell.KeyPgDn:
+			if event.Modifiers()&tcell.ModShift > 0 {
+				if tree.GetCurrentNode() != nil {
+					lastSelection = tree.GetCurrentNode()
+				}
+				tree.SetCurrentNode(nil)
+			} else if tree.GetCurrentNode() == nil && lastSelection != nil {
+				tree.SetCurrentNode(lastSelection)
+			}
 			return event
 		case tcell.KeyTab:
 			if pageName == "1" {
