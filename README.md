@@ -39,6 +39,7 @@ Flags:
       --use-name        Use file name even when there is no collision (default false).
       --workers=6       Count of parallel workers per directory.
       --text            Print results in text instead of GUI.
+      --file-count      Print file counts in GUI mode (default true).
 ```
 
 In GUI mode (default), you will be presented with a TreeView that lets you explore the differences in each directory.

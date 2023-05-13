@@ -26,6 +26,7 @@ var CLI struct {
 	UseName    bool   `default:"false" help:"Use file name even when there is no collision (default false)."`
 	Workers    int    `default:"6" help:"Count of parallel workers per directory."`
 	Text       bool   `default:"false" help:"Print results in text instead of GUI."`
+	FileCount  bool   `default:"true" help:"Print file counts in GUI mode (default true)."`
 }
 
 func main() {
@@ -43,6 +44,8 @@ func main() {
 }
 
 var seed = maphash.MakeSeed()
+
+const FileCountPlaceHolder = "[?] "
 
 func hash(info fs.FileInfo) uint64 {
 	data := make([]byte, 0, 32)
@@ -227,20 +230,30 @@ func pathToDirent(root *dirtree.Dirent, path string) *dirtree.Dirent {
 	return currNode
 }
 
-func expandPathToClosestNode(root *tview.TreeNode, path string, pageData []PageData) *tview.TreeNode {
+func getPartsToNode(root *tview.TreeNode, node *tview.TreeNode, pageData []PageData) []*tview.TreeNode {
+	var parts []*tview.TreeNode
+	walkToClosestNode(root, node.GetReference().(*NodeReference).entry.Path(),
+		func(node *tview.TreeNode) {
+			parts = append(parts, node)
+		}, pageData)
+	return parts
+}
+
+func walkToClosestNode(root *tview.TreeNode, path string, callback func(node *tview.TreeNode), pageData []PageData) *tview.TreeNode {
 	currNode := root
+	callback(currNode)
 outer:
 	for _, part := range append(strings.Split(path, "/")) {
 		if part == "" {
 			continue
 		}
 		if len(currNode.GetChildren()) == 0 {
-			addHandler(currNode, pageData)
+			addHandler(root, currNode, pageData)
 		}
-		currNode.Expand()
 		for _, child := range currNode.GetChildren() {
-			if child.GetReference() != nil && child.GetReference().(NodeReference).entry.String() == part {
+			if child.GetReference() != nil && child.GetReference().(*NodeReference).entry.String() == part {
 				currNode = child
+				callback(currNode)
 				continue outer
 			}
 		}
@@ -308,17 +321,18 @@ func work() error {
 }
 
 type NodeReference struct {
-	entry *dirtree.Dirent
-	isDir bool
+	entry     *dirtree.Dirent
+	isDir     bool
+	fileCount int
 }
 
-func addHandler(node *tview.TreeNode, pageData []PageData) {
+func addHandler(root *tview.TreeNode, node *tview.TreeNode, pageData []PageData) {
 	var dirs []*dirtree.Dirent
 	var files []*dirtree.Dirent
 	if node.GetReference() == nil {
 		return
 	}
-	reference := node.GetReference().(NodeReference)
+	reference := node.GetReference().(*NodeReference)
 	for _, name := range reference.entry.List() {
 		d := reference.entry.Child(name)
 		if hasChildren(d) {
@@ -357,15 +371,48 @@ func addHandler(node *tview.TreeNode, pageData []PageData) {
 				color = tcell.ColorWhite
 			}
 		}
-		node.AddChild(tview.NewTreeNode(entry.String()).
-			SetReference(NodeReference{entry, isDir}).
+		name := entry.String()
+		if CLI.FileCount && isDir {
+			name = FileCountPlaceHolder + name
+		}
+		node.AddChild(tview.NewTreeNode(name).
+			SetReference(&NodeReference{entry, isDir, 1}).
 			SetExpanded(false).
 			SetColor(color).
 			SetSelectable(isDir))
 	}
+	updateFileCounts(root, node, pageData)
 }
 
-func selectHandler(node *tview.TreeNode, recurse bool, pageData []PageData) {
+func updateFileCounts(root *tview.TreeNode, node *tview.TreeNode, pageData []PageData) {
+	childrenLen := len(node.GetChildren())
+	if !CLI.FileCount {
+		return
+	}
+	reference := node.GetReference().(*NodeReference)
+	if !reference.isDir {
+		return
+	}
+	reference.fileCount = childrenLen
+	updateFileCountText(node, childrenLen)
+	parts := getPartsToNode(root, node, pageData)
+	for i := len(parts) - 1; i >= 0; i-- {
+		reference := parts[i].GetReference().(*NodeReference)
+		reference.fileCount = 0
+		for _, child := range parts[i].GetChildren() {
+			if child.GetReference() != nil {
+				reference.fileCount += child.GetReference().(*NodeReference).fileCount
+			}
+		}
+		updateFileCountText(parts[i], reference.fileCount)
+	}
+}
+
+func updateFileCountText(node *tview.TreeNode, newCount int) {
+	node.SetText(fmt.Sprintf("[%d] %s", newCount, node.GetText()[strings.Index(node.GetText(), "] ")+2:]))
+}
+
+func selectHandler(root *tview.TreeNode, node *tview.TreeNode, recurse bool, pageData []PageData) {
 	if node.IsExpanded() {
 		if recurse {
 			node.CollapseAll()
@@ -375,28 +422,28 @@ func selectHandler(node *tview.TreeNode, recurse bool, pageData []PageData) {
 	} else {
 		children := node.GetChildren()
 		if len(children) == 0 {
-			addHandler(node, pageData)
+			addHandler(root, node, pageData)
 		}
 		node.SetExpanded(true)
 		if recurse {
 			for _, child := range node.GetChildren() {
-				selectHandler(child, true, pageData)
+				selectHandler(root, child, true, pageData)
 			}
 		}
 	}
 }
 
-func expandAtDepth(node *tview.TreeNode, depth int, pageData []PageData) {
+func expandAtDepth(root *tview.TreeNode, node *tview.TreeNode, depth int, pageData []PageData) {
 	if depth < 1 {
 		node.CollapseAll()
 	} else {
 		children := node.GetChildren()
 		if len(children) == 0 {
-			addHandler(node, pageData)
+			addHandler(root, node, pageData)
 		}
 		node.SetExpanded(true)
 		for _, child := range children {
-			expandAtDepth(child, depth-1, pageData)
+			expandAtDepth(root, child, depth-1, pageData)
 		}
 	}
 }
@@ -415,10 +462,14 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 	}
 	pages := tview.NewPages()
 	for _, data := range pageData {
-		root := tview.NewTreeNode(data.dirPath).
+		name := data.dirPath
+		if CLI.FileCount {
+			name = FileCountPlaceHolder + name
+		}
+		root := tview.NewTreeNode(name).
 			SetColor(tcell.ColorRed).
-			SetReference(NodeReference{data.dirDiff, true})
-		addHandler(root, pageData)
+			SetReference(&NodeReference{data.dirDiff, true, 1})
+		addHandler(root, root, pageData)
 		// this is a dummy directory, always last, so the user can select it and see any files that may otherwise be out of view
 		root.AddChild(tview.NewTreeNode(" ").
 			SetExpanded(false).
@@ -455,6 +506,7 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 	layout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		pageName, page := pages.GetFrontPage()
 		tree := page.(*tview.TreeView)
+		root := tree.GetRoot()
 		node := tree.GetCurrentNode()
 		// restrict keys allowed for "free move"
 		if node == nil {
@@ -520,25 +572,29 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 			}
 			_, newPage := pages.GetFrontPage()
 			newTree := newPage.(*tview.TreeView)
-			newNode := expandPathToClosestNode(newTree.GetRoot(), node.GetReference().(NodeReference).entry.Path(), pageData)
+			newNode := walkToClosestNode(
+				newTree.GetRoot(), node.GetReference().(*NodeReference).entry.Path(),
+				func(node *tview.TreeNode) {
+					node.Expand()
+				},
+				pageData)
 			newTree.SetCurrentNode(newNode)
 		case tcell.KeyF1:
-			selectHandler(node, true, pageData)
+			selectHandler(root, node, true, pageData)
 		case tcell.KeyLeft:
 			if node.IsExpanded() {
 				node.Collapse()
-			} else {
-				parentNode := expandPathToClosestNode(
-					tree.GetRoot(), filepath.Join(node.GetReference().(NodeReference).entry.Path(), ".."), pageData)
+			} else if parts := getPartsToNode(root, node, pageData); len(parts) > 1 {
+				parentNode := parts[len(parts)-2]
 				tree.SetCurrentNode(parentNode)
 			}
 		case tcell.KeyRight:
 			if !node.IsExpanded() {
-				selectHandler(node, false, pageData)
+				selectHandler(root, node, false, pageData)
 			} else {
 				children := node.GetChildren()
 				for _, child := range children {
-					if child.GetReference() != nil && child.GetReference().(NodeReference).isDir {
+					if child.GetReference() != nil && child.GetReference().(*NodeReference).isDir {
 						tree.SetCurrentNode(child)
 						break
 					}
@@ -550,7 +606,7 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 				if err != nil {
 					log.Fatalln(err)
 				}
-				expandAtDepth(node, int(depth), pageData)
+				expandAtDepth(root, node, int(depth), pageData)
 			} else if event.Rune() == 'q' {
 				app.Stop()
 			} else if event.Rune() == ' ' {
@@ -560,28 +616,30 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 					pages.SwitchToPage("1")
 				}
 			} else if event.Rune() == 'd' {
-				parentNode := expandPathToClosestNode(
-					tree.GetRoot(), filepath.Join(node.GetReference().(NodeReference).entry.Path(), ".."), pageData)
-				children := parentNode.GetChildren()
-				found := false
-				var nextNode *tview.TreeNode
-				for _, child := range children {
-					if child == node {
-						found = true
-						continue
-					}
-					if child.GetReference() != nil && child.GetReference().(NodeReference).isDir {
-						nextNode = child
-						if found {
-							break
+				if parts := getPartsToNode(root, node, pageData); len(parts) > 1 {
+					parentNode := parts[len(parts)-2]
+					children := parentNode.GetChildren()
+					found := false
+					var nextNode *tview.TreeNode
+					for _, child := range children {
+						if child == node {
+							found = true
+							continue
+						}
+						if child.GetReference() != nil && child.GetReference().(*NodeReference).isDir {
+							nextNode = child
+							if found {
+								break
+							}
 						}
 					}
+					if nextNode == nil {
+						nextNode = parentNode
+					}
+					tree.SetCurrentNode(nextNode)
+					parentNode.RemoveChild(node)
+					updateFileCounts(root, nextNode, pageData)
 				}
-				if nextNode == nil {
-					nextNode = parentNode
-				}
-				tree.SetCurrentNode(nextNode)
-				parentNode.RemoveChild(node)
 			}
 		}
 		return nil
