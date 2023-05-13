@@ -239,7 +239,7 @@ outer:
 		}
 		currNode.Expand()
 		for _, child := range currNode.GetChildren() {
-			if child.GetText() == part {
+			if child.GetReference() != nil && child.GetReference().(NodeReference).entry.String() == part {
 				currNode = child
 				continue outer
 			}
