@@ -387,13 +387,13 @@ func selectHandler(node *tview.TreeNode, recurse bool, pageData []PageData) {
 }
 
 func expandAtDepth(node *tview.TreeNode, depth int, pageData []PageData) {
-	children := node.GetChildren()
-	if len(children) == 0 {
-		addHandler(node, pageData)
-	}
 	if depth < 1 {
 		node.CollapseAll()
 	} else {
+		children := node.GetChildren()
+		if len(children) == 0 {
+			addHandler(node, pageData)
+		}
 		node.SetExpanded(true)
 		for _, child := range children {
 			expandAtDepth(child, depth-1, pageData)
