@@ -437,12 +437,11 @@ func expandAtDepth(root *tview.TreeNode, node *tview.TreeNode, depth int, pageDa
 	if depth < 1 {
 		node.CollapseAll()
 	} else {
-		children := node.GetChildren()
-		if len(children) == 0 {
+		if len(node.GetChildren()) == 0 {
 			addHandler(root, node, pageData)
 		}
 		node.SetExpanded(true)
-		for _, child := range children {
+		for _, child := range node.GetChildren() {
 			expandAtDepth(root, child, depth-1, pageData)
 		}
 	}
