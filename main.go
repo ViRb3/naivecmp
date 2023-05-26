@@ -375,7 +375,7 @@ func addHandler(root *tview.TreeNode, node *tview.TreeNode, pageData []PageData)
 		if CLI.FileCount && isDir {
 			name = FileCountPlaceHolder + name
 		}
-		node.AddChild(tview.NewTreeNode(name).
+		node.AddChild(tview.NewTreeNode(tview.Escape(name)).
 			SetReference(&NodeReference{entry, isDir, 1}).
 			SetExpanded(false).
 			SetColor(color).
@@ -465,12 +465,12 @@ func renderUI(diffA *dirtree.Dirent, diffB *dirtree.Dirent) error {
 		if CLI.FileCount {
 			name = FileCountPlaceHolder + name
 		}
-		root := tview.NewTreeNode(name).
+		root := tview.NewTreeNode(tview.Escape(name)).
 			SetColor(tcell.ColorRed).
 			SetReference(&NodeReference{data.dirDiff, true, 1})
 		addHandler(root, root, pageData)
 		// this is a dummy directory, always last, so the user can select it and see any files that may otherwise be out of view
-		root.AddChild(tview.NewTreeNode(" ").
+		root.AddChild(tview.NewTreeNode(tview.Escape(" ")).
 			SetExpanded(false).
 			SetReference(nil).
 			SetSelectable(true))
