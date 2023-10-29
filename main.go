@@ -24,6 +24,7 @@ var CLI struct {
 	UseSize    bool   `default:"true" help:"Use file size (default true)."`
 	UseMode    bool   `default:"false" help:"Use file mode (default false)."`
 	UseName    bool   `default:"false" help:"Use file name even when there is no collision (default false)."`
+	UsePath    bool   `default:"false" help:"Use file directory path (default false)."`
 	Workers    int    `default:"6" help:"Count of parallel workers per directory."`
 	Text       bool   `default:"false" help:"Print results in text instead of GUI."`
 	FileCount  bool   `default:"true" help:"Print file counts in GUI mode (default true)."`
@@ -47,7 +48,7 @@ var seed = maphash.MakeSeed()
 
 const FileCountPlaceHolder = "[?] "
 
-func hash(info fs.FileInfo) uint64 {
+func hash(filePath string, info fs.FileInfo) uint64 {
 	data := make([]byte, 0, 32)
 	if CLI.UseMode {
 		data = binary.LittleEndian.AppendUint32(data, uint32(info.Mode()))
@@ -57,6 +58,10 @@ func hash(info fs.FileInfo) uint64 {
 	}
 	if CLI.UseSize {
 		data = binary.LittleEndian.AppendUint64(data, uint64(info.Size()))
+	}
+	if CLI.UsePath {
+		fileDir := filepath.Dir(filePath) + string(filepath.Separator)
+		data = append(data, []byte(fileDir)...)
 	}
 	if CLI.UseName {
 		data = append(data, []byte(info.Name())...)
@@ -140,7 +145,7 @@ func mapWorker(scanEntry ScanEntry, dirMap *DirMap, scanChan chan ScanEntry) err
 	if err != nil {
 		return err
 	}
-	h := hash(info)
+	h := hash(scanEntry.path, info)
 	dirMap.mapMutex.Lock()
 	if v, ok := dirMap.hashMap[h]; ok {
 		dirMap.hashMap[h] = append(v, curNode)

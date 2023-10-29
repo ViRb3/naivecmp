@@ -37,6 +37,7 @@ Flags:
       --use-size        Use file size (default true).
       --use-mode        Use file mode (default false).
       --use-name        Use file name even when there is no collision (default false).
+      --use-path        Use file directory path (default false).
       --workers=6       Count of parallel workers per directory.
       --text            Print results in text instead of GUI.
       --file-count      Print file counts in GUI mode (default true).
