@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ var CLI struct {
 	Workers    int    `default:"6" help:"Count of parallel workers per directory."`
 	Text       bool   `default:"false" help:"Print results in text instead of GUI."`
 	FileCount  bool   `default:"true" help:"Print file counts in GUI mode (default true)."`
+	Debug      bool   `default:"false" help:"Print debug output, useful to troubleshoot issues."`
 }
 
 func main() {
@@ -313,6 +315,12 @@ func work() error {
 	}
 	log.Println("Done")
 	if CLI.Text {
+		if CLI.Debug {
+			fmt.Printf("========== Debug for %s ==========\n", CLI.DirA)
+			printDebug(dirA)
+			fmt.Printf("========== Debug for %s ==========\n", CLI.DirB)
+			printDebug(dirB)
+		}
 		fmt.Printf("========== Only in %s ==========\n", CLI.DirA)
 		printDir(diffA)
 		fmt.Printf("========== Only in %s ==========\n", CLI.DirB)
@@ -323,6 +331,19 @@ func work() error {
 		}
 	}
 	return nil
+}
+
+func printDebug(dirMap *DirMap) {
+	entries := make([]*dirtree.Dirent, 0, len(dirMap.entryMap))
+	for entry := range dirMap.entryMap {
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Path() < entries[j].Path()
+	})
+	for _, entry := range entries {
+		fmt.Printf("%s %d\n", entry.Path(), dirMap.entryMap[entry])
+	}
 }
 
 type NodeReference struct {
