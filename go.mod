@@ -3,7 +3,7 @@ module naivecmp
 go 1.20
 
 require (
-	github.com/alecthomas/kong v1.6.0
+	github.com/alecthomas/kong v1.6.1
 	github.com/gammazero/dirtree v0.0.0-20210217052815-6dd7bcadd172
 	github.com/gdamore/tcell/v2 v2.7.4
 	github.com/rivo/tview v0.0.0-20241103174730-c76f7879f592
