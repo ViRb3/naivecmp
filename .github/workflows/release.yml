@@ -7,11 +7,11 @@ on:
 
 jobs:
   binaries:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.1.1
+        uses: actions/checkout@v7.0.0
         with:
           token: ${{ secrets.API_GITHUB_TOKEN }}
 
@@ -21,14 +21,14 @@ jobs:
           [ -n "$GO_VERSION" ] || exit 1
           echo "go_version=$GO_VERSION" >> $GITHUB_ENV
       - name: Setup Go environment
-        uses: actions/setup-go@v5.0.0
+        uses: actions/setup-go@v6.5.0
         with:
           go-version: "${{ env.go_version }}"
 
       - name: Binaries Release
-        uses: goreleaser/goreleaser-action@v5.0.0
+        uses: goreleaser/goreleaser-action@v7.2.3
         with:
-          version: ~> 1.16.2
-          args: release --rm-dist
+          version: ~> 2.17.0
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.API_GITHUB_TOKEN }}
