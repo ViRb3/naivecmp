@@ -87,6 +87,9 @@ type ScanEntry struct {
 }
 
 func mapDir(dir string) (*DirMap, error) {
+	if CLI.Workers < 1 {
+		return nil, fmt.Errorf("workers must be at least 1")
+	}
 	dirMap := DirMap{
 		root:     dirtree.New(""),
 		basePath: dir,
@@ -165,13 +168,13 @@ func addDiffEntry(diff *dirtree.Dirent, entry *dirtree.Dirent) error {
 		if part == "" {
 			continue
 		}
-			newNode := curNode.Child(part)
-			var err error
-			if newNode == nil {
-				newNode, err = curNode.Add(part)
-				if err != nil {
-					return err
-				}
+		newNode := curNode.Child(part)
+		var err error
+		if newNode == nil {
+			newNode, err = curNode.Add(part)
+			if err != nil {
+				return err
+			}
 		}
 		curNode = newNode
 	}
@@ -317,6 +320,9 @@ func printDir(dir *dirtree.Dirent) {
 }
 
 func work() error {
+	if CLI.Workers < 1 {
+		return fmt.Errorf("workers must be at least 1")
+	}
 	log.Println("Mapping directories...")
 	var wg sync.WaitGroup
 	wg.Add(2)
