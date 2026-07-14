@@ -159,47 +159,12 @@ func mapWorker(scanEntry ScanEntry, dirMap *DirMap, scanChan chan ScanEntry) err
 	return nil
 }
 
-func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent, diff *dirtree.Dirent) error {
-	isDir := false
-	dirA.ForChild(func(d *dirtree.Dirent) bool {
-		isDir = true
-		if err := walkDir(mapA, mapB, d, diff); err != nil {
-			log.Fatalln(err)
+func addDiffEntry(diff *dirtree.Dirent, entry *dirtree.Dirent) error {
+	curNode := diff
+	for _, part := range strings.Split(entry.Path(), "/") {
+		if part == "" {
+			continue
 		}
-		return true
-	})
-	if isDir {
-		return nil
-	}
-	h, ok := mapA.entryMap[dirA]
-	if !ok {
-		// this is a directory
-		return nil
-	}
-	var matched bool
-	if matches, ok := mapB.hashMap[h]; !ok {
-		// file is missing from dirB
-		matched = false
-	} else if len(matches) == 1 {
-		// file is present in dirB
-		matched = true
-	} else {
-		// if multiple files in dirB have the same hash, fall back to comparing full path
-		matched = false
-		for _, match := range matches {
-			if match.Path() == dirA.Path() {
-				matched = true
-				break
-			}
-		}
-	}
-	if !matched {
-		parts := strings.Split(dirA.Path(), "/")
-		curNode := diff
-		for _, part := range parts {
-			if part == "" {
-				continue
-			}
 			newNode := curNode.Child(part)
 			var err error
 			if newNode == nil {
@@ -207,11 +172,82 @@ func walkDir(mapA, mapB *DirMap, dirA *dirtree.Dirent, diff *dirtree.Dirent) err
 				if err != nil {
 					return err
 				}
-			}
-			curNode = newNode
 		}
+		curNode = newNode
 	}
 	return nil
+}
+
+// compareDirs matches files one-to-one within each attribute-hash bucket.
+// Equal paths are paired first; remaining entries are paired in path order so
+// moved or renamed files still match while duplicate counts remain significant.
+func compareDirs(mapA, mapB *DirMap) (*dirtree.Dirent, *dirtree.Dirent, error) {
+	diffA := dirtree.New("")
+	diffB := dirtree.New("")
+	hashes := make(map[uint64]struct{}, len(mapA.hashMap)+len(mapB.hashMap))
+	for h := range mapA.hashMap {
+		hashes[h] = struct{}{}
+	}
+	for h := range mapB.hashMap {
+		hashes[h] = struct{}{}
+	}
+
+	for h := range hashes {
+		entriesA := append([]*dirtree.Dirent(nil), mapA.hashMap[h]...)
+		entriesB := append([]*dirtree.Dirent(nil), mapB.hashMap[h]...)
+		sort.Slice(entriesA, func(i, j int) bool { return entriesA[i].Path() < entriesA[j].Path() })
+		sort.Slice(entriesB, func(i, j int) bool { return entriesB[i].Path() < entriesB[j].Path() })
+
+		matchedA := make([]bool, len(entriesA))
+		matchedB := make([]bool, len(entriesB))
+		byPathB := make(map[string]int, len(entriesB))
+		for i, entry := range entriesB {
+			byPathB[entry.Path()] = i
+		}
+		for i, entry := range entriesA {
+			if j, ok := byPathB[entry.Path()]; ok {
+				matchedA[i] = true
+				matchedB[j] = true
+			}
+		}
+
+		var remainingA, remainingB []int
+		for i := range entriesA {
+			if !matchedA[i] {
+				remainingA = append(remainingA, i)
+			}
+		}
+		for i := range entriesB {
+			if !matchedB[i] {
+				remainingB = append(remainingB, i)
+			}
+		}
+		pairCount := len(remainingA)
+		if len(remainingB) < pairCount {
+			pairCount = len(remainingB)
+		}
+		for i := 0; i < pairCount; i++ {
+			matchedA[remainingA[i]] = true
+			matchedB[remainingB[i]] = true
+		}
+
+		for i, entry := range entriesA {
+			if !matchedA[i] {
+				if err := addDiffEntry(diffA, entry); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+		for i, entry := range entriesB {
+			if !matchedB[i] {
+				if err := addDiffEntry(diffB, entry); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+
+	return diffA, diffB, nil
 }
 
 func hasChildren(d *dirtree.Dirent) bool {
@@ -225,7 +261,7 @@ func hasChildren(d *dirtree.Dirent) bool {
 
 func pathToDirent(root *dirtree.Dirent, path string) *dirtree.Dirent {
 	currNode := root
-	for _, part := range append(strings.Split(path, "/")) {
+	for _, part := range strings.Split(path, "/") {
 		if part == "" {
 			continue
 		}
@@ -250,7 +286,7 @@ func walkToClosestNode(root *tview.TreeNode, path string, callback func(node *tv
 	currNode := root
 	callback(currNode)
 outer:
-	for _, part := range append(strings.Split(path, "/")) {
+	for _, part := range strings.Split(path, "/") {
 		if part == "" {
 			continue
 		}
@@ -305,12 +341,8 @@ func work() error {
 	}()
 	wg.Wait()
 	log.Println("Comparing...")
-	diffA := dirtree.New("")
-	if err := walkDir(dirA, dirB, dirA.root, diffA); err != nil {
-		return err
-	}
-	diffB := dirtree.New("")
-	if err := walkDir(dirB, dirA, dirB.root, diffB); err != nil {
+	diffA, diffB, err := compareDirs(dirA, dirB)
+	if err != nil {
 		return err
 	}
 	log.Println("Done")

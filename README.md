@@ -8,7 +8,7 @@ naivecmp aims to solve this problem by providing you with a very fast way to com
 
 ### Disclaimer
 
-While this tool has been perfectly accurate in my own tests, it is still fundamentally flawed (thus the "naive" name) — you may get false negatives if two different files have the same file attributes, or if the content of a file was changed without altering its size or modification time. In case there are hash collisions, naivecmp will fall back to comparing the full path, but even then, this is not a 100% guarantee the files are identical. Therefore, do not rely on this tool for mission-critical decisions. Use it only as a quick way to check the "most likely" changes between two directories.
+While this tool has been perfectly accurate in my own tests, it is still fundamentally flawed (thus the "naive" name) — you may get false negatives if two different files have the same file attributes, or if the content of a file was changed without altering its size or modification time. When multiple files have the same matching attributes, naivecmp pairs equal paths first and then pairs the remaining entries one-to-one. This preserves file counts but cannot prove which duplicate corresponds to which file. Therefore, do not rely on this tool for mission-critical decisions. Use it only as a quick way to check the "most likely" changes between two directories.
 
 ### Features
 
